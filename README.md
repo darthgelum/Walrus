@@ -1,6 +1,6 @@
 # Walrus Framework 🦭
 
-A lightweight, console-based C++ application framework featuring a powerful layer system and JavaScript-like event loop for asynchronous programming.
+A lightweight, console-based C++ application framework featuring layer system, EventLoop for asynchronous programming, and PubSub messaging.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -8,14 +8,14 @@ A lightweight, console-based C++ application framework featuring a powerful laye
 - [Quick Start](#quick-start)
 - [Layer System](#layer-system)
 - [EventLoop System](#eventloop-system)
+- [PubSub Messaging](#pubsub-messaging)
+- [Configuration](#configuration)
 - [API Reference](#api-reference)
-- [Examples](#examples)
 - [Building](#building)
-- [Project Structure](#project-structure)
 
 ## Overview
 
-Walrus is a modern C++ framework designed for console applications that need structured architecture and asynchronous capabilities. Born from simplifying complex UI frameworks, Walrus focuses on core application lifecycle management with powerful async features.
+Walrus is a modern C++ framework for console applications with structured architecture, asynchronous capabilities, and type-safe messaging. It provides configurable EventLoop and PubSub systems that can be enabled/disabled at build time.
 
 ## Features
 
@@ -23,52 +23,78 @@ Walrus is a modern C++ framework designed for console applications that need str
 - **Layer-based Architecture**: Organize code into reusable, composable layers
 - **Application Lifecycle**: Structured initialization, update, and shutdown
 - **Cross-platform**: Works on Windows, Linux, and macOS
-- **CMake Build System**: Modern, reliable build configuration
+- **Configurable Build**: Enable/disable features via CMake
 
-### ⚡ **EventLoop System**
+### ⚡ **EventLoop System** (Optional)
 - **SetTimeout**: Execute callbacks once after a delay
 - **SetInterval**: Execute callbacks repeatedly at intervals
 - **SetImmediate**: Execute callbacks as soon as possible
-- **ClearInterval/ClearTimeout**: Cancel scheduled callbacks
-- **Thread Pool**: Parallel execution with configurable worker threads
+- **Thread Pool**: Parallel execution with automatic scaling
 - **Thread Safety**: All operations are thread-safe
-- **Exception Handling**: Robust error handling for callbacks
 
-### 🛠 **Utilities**
-- **High-Resolution Timer**: Precise timing measurements
-- **Random Number Generation**: Thread-safe random utilities
-- **Resource Management**: Automatic cleanup and RAII principles
+### 📬 **PubSub Messaging** (Optional)
+- **Type-Safe Messages**: Templated message system with compile-time safety
+- **Topic-Based Routing**: Organize messages by topics
+- **Multiple Subscribers**: Many-to-many messaging patterns
+- **Configurable Brokers**: Pluggable broker implementations
+- **Thread-Safe Operations**: Concurrent publish/subscribe support
 
 ## Quick Start
 
-### 1. Create a Simple Application
+### 1. Simple EventLoop + PubSub Example
 
 ```cpp
 #include "Walrus/Application.h"
 #include "Walrus/EntryPoint.h"
+#include "Walrus/InMemoryBroker.h"
 
-class MyLayer : public Walrus::Layer
-{
+struct MyData {
+    int id;
+    std::string message;
+};
+
+class SenderLayer : public Walrus::Layer {
+    Walrus::EventId m_IntervalId = 0;
+    int m_Counter = 0;
+    
 public:
-    virtual void OnAttach() override 
-    {
-        std::cout << "Hello, Walrus!" << std::endl;
-        
-        // Use the event loop
+    virtual void OnAttach() override {
         auto& app = Walrus::Application::Get();
-        app.SetTimeout([]() {
-            std::cout << "This runs after 2 seconds!" << std::endl;
-        }, 2000);
+        
+        // Send data every 1000ms
+        m_IntervalId = app.SetInterval([this, &app]() {
+            MyData data{++m_Counter, "Message #" + std::to_string(m_Counter)};
+            app.Publish<MyData>("my_topic", data);
+            
+            if (m_Counter >= 5) {
+                app.ClearInterval(m_IntervalId);
+                app.SetTimeout([&app]() { app.Close(); }, 1000);
+            }
+        }, 1000);
     }
 };
 
-Walrus::Application* Walrus::CreateApplication(int argc, char** argv)
-{
-    Walrus::ApplicationSpecification spec;
-    spec.Name = "My Walrus App";
+class ReceiverLayer : public Walrus::Layer {
+public:
+    virtual void OnAttach() override {
+        auto& app = Walrus::Application::Get();
+        
+        // Subscribe to messages
+        app.Subscribe<MyData>("my_topic", [](const Walrus::Message<MyData>& msg) {
+            const MyData& data = msg.GetData();
+            std::cout << "Received: " << data.id << " - " << data.message << std::endl;
+        });
+    }
+};
 
-    Walrus::Application* app = new Walrus::Application(spec);
-    app->PushLayer<MyLayer>();
+Walrus::Application* Walrus::CreateApplication(int argc, char** argv) {
+    Walrus::ApplicationSpecification spec;
+    spec.Name = "EventLoop + PubSub Demo";
+    spec.PubSubBroker = std::make_shared<Walrus::InMemoryBroker>();
+
+    auto* app = new Walrus::Application(spec);
+    app->PushLayer<ReceiverLayer>();
+    app->PushLayer<SenderLayer>();
     return app;
 }
 ```
@@ -77,55 +103,27 @@ Walrus::Application* Walrus::CreateApplication(int argc, char** argv)
 
 ```bash
 mkdir build && cd build
-cmake ..
-make
+cmake -DWALRUS_ENABLE_EVENT_LOOP=ON -DWALRUS_ENABLE_PUBSUB=ON ..
+cmake --build .
 ./bin/WalrusApp
 ```
 
 ## Layer System
 
-The layer system provides a clean way to organize your application logic into modular, reusable components.
-
-### Layer Interface
+Organize your application into modular, reusable components.
 
 ```cpp
-class Layer 
-{
+class GameLayer : public Walrus::Layer {
 public:
-    virtual ~Layer() = default;
-    
-    virtual void OnAttach() {}    // Called when layer is added
-    virtual void OnDetach() {}    // Called when layer is removed  
-    virtual void OnUpdate(float deltaTime) {}  // Called every frame
-};
-```
-
-### Creating Layers
-
-```cpp
-class GameLayer : public Walrus::Layer 
-{
-private:
-    Walrus::Timer m_Timer;
-    
-public:
-    virtual void OnAttach() override 
-    {
+    virtual void OnAttach() override {
         std::cout << "Game initialized!" << std::endl;
-        m_Timer.Reset();
     }
     
-    virtual void OnUpdate(float deltaTime) override 
-    {
-        // Game logic here
-        if (m_Timer.Elapsed() > 1.0f) {
-            std::cout << "Game tick!" << std::endl;
-            m_Timer.Reset();
-        }
+    virtual void OnUpdate(float deltaTime) override {
+        // Called every frame - keep lightweight
     }
     
-    virtual void OnDetach() override 
-    {
+    virtual void OnDetach() override {
         std::cout << "Game cleanup!" << std::endl;
     }
 };
@@ -134,73 +132,282 @@ public:
 app->PushLayer<GameLayer>();
 ```
 
-### Layer Benefits
-
-- ✅ **Modular**: Each layer handles specific functionality
-- ✅ **Reusable**: Layers can be used across different applications  
-- ✅ **Lifecycle Management**: Automatic attach/detach handling
-- ✅ **No Implementation Required**: Override only what you need
-
 ## EventLoop System
 
-The EventLoop provides JavaScript-like asynchronous programming capabilities with true parallel execution.
-
-### Core Functions
-
-#### SetTimeout
-Execute a callback once after a delay:
+JavaScript-like asynchronous programming with true parallel execution.
 
 ```cpp
 auto& app = Walrus::Application::Get();
 
-auto timeoutId = app.SetTimeout([]() {
-    std::cout << "This executes after 1.5 seconds" << std::endl;
-}, 1500);
+// Execute once after delay
+EventId timeoutId = app.SetTimeout([]() {
+    std::cout << "Delayed execution!" << std::endl;
+}, 2000);
 
-// Cancel if needed
-app.ClearTimeout(timeoutId);
-```
-
-#### SetInterval
-Execute a callback repeatedly at intervals:
-
-```cpp
-auto intervalId = app.SetInterval([]() {
-    std::cout << "This repeats every 1 second" << std::endl;
+// Execute repeatedly
+EventId intervalId = app.SetInterval([]() {
+    std::cout << "Repeated execution!" << std::endl;
 }, 1000);
 
-// Stop the interval
+// Execute ASAP
+app.SetImmediate([]() {
+    std::cout << "Immediate execution!" << std::endl;
+});
+
+// Cancel timers
+app.ClearTimeout(timeoutId);
 app.ClearInterval(intervalId);
 ```
 
-#### SetImmediate
-Execute a callback as soon as possible:
+## PubSub Messaging
+
+Type-safe publish/subscribe messaging system for decoupled communication.
+
+### Basic Usage
 
 ```cpp
-app.SetImmediate([]() {
-    std::cout << "This executes immediately!" << std::endl;
+// Define your message type
+struct PlayerEvent {
+    int playerId;
+    std::string action;
+    float timestamp;
+};
+
+// Subscribe to messages
+app.Subscribe<PlayerEvent>("player_events", [](const Walrus::Message<PlayerEvent>& msg) {
+    const PlayerEvent& event = msg.GetData();
+    std::cout << "Player " << event.playerId << " performed: " << event.action << std::endl;
 });
+
+// Publish messages
+PlayerEvent event{1, "jump", app.GetTime()};
+app.Publish<PlayerEvent>("player_events", event);
 ```
 
-### Advanced Usage
+### Advanced Patterns
 
-#### Chained Operations
+#### Multiple Subscribers
 ```cpp
-void StartProcess() {
-    auto& app = Walrus::Application::Get();
+// Multiple objects can subscribe to the same topic
+class UI : public Walrus::Layer {
+public:
+    virtual void OnAttach() override {
+        auto& app = Walrus::Application::Get();
+        app.Subscribe<GameEvent>("game", [](const auto& msg) {
+            // Update UI based on game events
+        });
+    }
+};
+
+class AudioSystem : public Walrus::Layer {
+public:
+    virtual void OnAttach() override {
+        auto& app = Walrus::Application::Get();
+        app.Subscribe<GameEvent>("game", [](const auto& msg) {
+            // Play sounds based on game events
+        });
+    }
+};
+```
+
+#### Topic Organization
+```cpp
+// Use descriptive topic names
+app.Subscribe<PlayerEvent>("player/movement", handler);
+app.Subscribe<PlayerEvent>("player/combat", handler);
+app.Subscribe<SystemEvent>("system/error", handler);
+app.Subscribe<SystemEvent>("system/debug", handler);
+
+// Publish to specific topics
+app.Publish<PlayerEvent>("player/movement", moveEvent);
+app.Publish<SystemEvent>("system/error", errorEvent);
+```
+
+#### Combining with EventLoop
+```cpp
+class DataProcessor : public Walrus::Layer {
+    Walrus::EventId m_ProcessorId;
     
-    app.SetImmediate([]() {
-        std::cout << "Step 1: Starting..." << std::endl;
+public:
+    virtual void OnAttach() override {
+        auto& app = Walrus::Application::Get();
         
-        Walrus::Application::Get().SetTimeout([]() {
-            std::cout << "Step 2: Processing..." << std::endl;
-            
-            Walrus::Application::Get().SetTimeout([]() {
-                std::cout << "Step 3: Complete!" << std::endl;
-            }, 1000);
-        }, 2000);
-    });
-}
+        // Subscribe to raw data
+        app.Subscribe<RawData>("input", [&app](const auto& msg) {
+            // Process and republish
+            ProcessedData result = processData(msg.GetData());
+            app.Publish<ProcessedData>("output", result);
+        });
+        
+        // Periodic status updates
+        m_ProcessorId = app.SetInterval([&app]() {
+            StatusUpdate status{getSystemStatus()};
+            app.Publish<StatusUpdate>("system/status", status);
+        }, 5000);
+    }
+    
+    virtual void OnDetach() override {
+        auto& app = Walrus::Application::Get();
+        app.ClearInterval(m_ProcessorId);
+    }
+};
+```
+
+### Custom Brokers
+
+Implement your own broker for specialized needs:
+
+```cpp
+class NetworkBroker : public Walrus::IBroker {
+public:
+    void Start() override {
+        // Initialize network connections
+    }
+    
+    void Stop() override {
+        // Cleanup network resources
+    }
+    
+    // Implement required virtual methods...
+};
+
+// Use custom broker
+Walrus::ApplicationSpecification spec;
+spec.PubSubBroker = std::make_shared<NetworkBroker>();
+```
+
+## Configuration
+
+Control which features are compiled into your application:
+
+```bash
+# Enable both EventLoop and PubSub (default)
+cmake -DWALRUS_ENABLE_EVENT_LOOP=ON -DWALRUS_ENABLE_PUBSUB=ON ..
+
+# EventLoop only
+cmake -DWALRUS_ENABLE_EVENT_LOOP=ON -DWALRUS_ENABLE_PUBSUB=OFF ..
+
+# PubSub only  
+cmake -DWALRUS_ENABLE_EVENT_LOOP=OFF -DWALRUS_ENABLE_PUBSUB=ON ..
+
+# Basic framework only
+cmake -DWALRUS_ENABLE_EVENT_LOOP=OFF -DWALRUS_ENABLE_PUBSUB=OFF ..
+```
+
+### Runtime Behavior
+
+- **Features Enabled**: Full functionality available
+- **Features Disabled**: Compile-time errors if you try to use disabled features  
+- **No Runtime Checks**: Clean, fast code - errors caught at compile time
+
+## API Reference
+
+### Application Class
+
+```cpp
+class Application {
+public:
+    // Core
+    static Application& Get();
+    void Run();
+    void Close();
+    float GetTime();
+    
+    // Layer Management
+    template<typename T> void PushLayer();
+    void PushLayer(const std::shared_ptr<Layer>& layer);
+    
+    // EventLoop (when enabled)
+    EventId SetTimeout(EventCallback callback, int milliseconds);
+    EventId SetInterval(EventCallback callback, int milliseconds);
+    EventId SetImmediate(EventCallback callback);
+    void ClearInterval(EventId id);
+    void ClearTimeout(EventId id);
+    
+    // PubSub (when enabled)
+    template<typename T> void Subscribe(const std::string& topic, MessageHandler<T> handler);
+    template<typename T> void Publish(const std::string& topic, const T& data);
+    void UnsubscribeFromTopic(const std::string& topic);
+};
+```
+
+### ApplicationSpecification
+
+```cpp
+struct ApplicationSpecification {
+    std::string Name = "Walrus App";
+    std::shared_ptr<IBroker> PubSubBroker = nullptr;  // When PubSub enabled
+};
+```
+
+### Layer Interface
+
+```cpp
+class Layer {
+public:
+    virtual ~Layer() = default;
+    virtual void OnAttach() {}    // Override to initialize
+    virtual void OnDetach() {}    // Override to cleanup
+    virtual void OnUpdate(float deltaTime) {}  // Override for per-frame logic
+};
+```
+
+### PubSub Types
+
+```cpp
+// Message wrapper
+template<typename T>
+class Message {
+public:
+    const T& GetData() const;
+    const std::string& GetTopic() const;
+};
+
+// Message handler callback
+template<typename T>
+using MessageHandler = std::function<void(const Message<T>&)>;
+
+// Broker interface for custom implementations
+class IBroker {
+public:
+    virtual void Start() = 0;
+    virtual void Stop() = 0;
+    virtual bool IsRunning() const = 0;
+    // Subscribe/Publish methods available via templates
+};
+```
+
+## Building
+
+### Requirements
+- **C++17 or later**
+- **CMake 3.15+**
+- **GCC, Clang, or MSVC**
+
+### Quick Build
+```bash
+git clone <repository-url>
+cd Walnut
+mkdir build && cd build
+cmake -DWALRUS_ENABLE_EVENT_LOOP=ON -DWALRUS_ENABLE_PUBSUB=ON ..
+cmake --build .
+./bin/WalrusApp
+```
+
+### Project Structure
+```
+Walnut/
+├── CMakeLists.txt
+├── Walrus/                    # Framework library
+│   └── src/Walrus/
+│       ├── Application.h/.cpp
+│       ├── Layer.h
+│       ├── EventLoop.h/.cpp
+│       ├── PubSub.h
+│       ├── InMemoryBroker.h
+│       └── Config.h
+└── WalrusApp/                 # Example application
+    └── src/WalrusApp.cpp
 ```
 
 #### Self-Managing Intervals
@@ -551,48 +758,37 @@ If you're coming from other frameworks:
 
 ## Best Practices
 
-### 🎯 **Layer Design**
-- Keep layers focused on single responsibilities
-- Use OnAttach for initialization, OnDetach for cleanup
-- OnUpdate should be lightweight and fast
-- Prefer EventLoop for heavy/async operations
+### 🎯 **Design Principles**
+- **Layer Separation**: Use layers for logical separation of concerns
+- **EventLoop for Async**: Use SetTimeout/SetInterval instead of manual threading  
+- **PubSub for Communication**: Decouple components with type-safe messaging
+- **RAII Everything**: Leverage C++ destructors for automatic cleanup
 
-### ⚡ **EventLoop Usage**  
-- Use SetImmediate for breaking up heavy work
-- SetInterval for regular monitoring/updates
-- SetTimeout for delayed actions and timeouts
-- Always store EventIds if you need to cancel
-- Callbacks should be exception-safe
-
-### 🔧 **Performance**
-- EventLoop callbacks run in parallel - avoid shared state or use atomics
-- Use RAII for resource management in layers
-- Prefer references over copies in callbacks
-- Consider callback frequency for SetInterval
+### ⚡ **Performance Tips**
+- EventLoop callbacks run in parallel - avoid shared mutable state
+- PubSub messages are copied - consider move semantics for large objects
+- Use references in callbacks to avoid unnecessary copies
+- SetInterval frequency should match actual needs
 
 ### 🛡️ **Error Handling**
-- EventLoop catches and logs callback exceptions
-- Layers should handle their own exceptions in lifecycle methods
+- Framework catches and logs callback exceptions safely
+- Always clean up EventIds in OnDetach if needed
 - Use smart pointers for automatic memory management
+- Design layers to be exception-safe
+
+### 📬 **PubSub Patterns**
+- Use descriptive topic names: `"player/movement"`, `"system/error"`
+- Keep message types simple and copyable  
+- Consider message frequency and size for performance
+- Unsubscribe in OnDetach if using manual subscriptions
 
 ## Acknowledgments
 
-This project is inspired by and builds upon the excellent work of:
+This project builds upon the excellent work of:
+- **[Yan Chernikov (TheCherno)](https://github.com/TheCherno)** - Original Walnut framework design
+- **[Walnut Framework](https://github.com/StudioCherno/Walnut)** - Architecture inspiration
 
-- **[Yan Chernikov (TheCherno)](https://github.com/TheCherno)** - For the original Walnut framework design and architecture inspiration
-- **[Walnut Framework](https://github.com/StudioCherno/Walnut)** - The original Vulkan/ImGui-based application framework that served as the foundation for this console-focused adaptation
-
-The core layer system architecture, application lifecycle management, and overall design philosophy are derived from TheCherno's Walnut framework. This project represents a specialized adaptation focused on console applications with added asynchronous capabilities.
-
-Special thanks to the original Walnut project for providing an excellent foundation for building modern C++ applications!
-
-## Contributing
-
-Contributions are welcome! Please ensure:
-- Code follows existing style
-- New features include examples
-- CMake configuration is updated for new files
-- Documentation is updated
+Core layer system and application lifecycle derived from the original Walnut project, adapted for console applications with async and messaging capabilities.
 
 ## License
 

@@ -575,6 +575,17 @@ If you're coming from other frameworks:
 - Layers should handle their own exceptions in lifecycle methods
 - Use smart pointers for automatic memory management
 
+## Acknowledgments
+
+This project is inspired by and builds upon the excellent work of:
+
+- **[Yan Chernikov (TheCherno)](https://github.com/TheCherno)** - For the original Walnut framework design and architecture inspiration
+- **[Walnut Framework](https://github.com/StudioCherno/Walnut)** - The original Vulkan/ImGui-based application framework that served as the foundation for this console-focused adaptation
+
+The core layer system architecture, application lifecycle management, and overall design philosophy are derived from TheCherno's Walnut framework. This project represents a specialized adaptation focused on console applications with added asynchronous capabilities.
+
+Special thanks to the original Walnut project for providing an excellent foundation for building modern C++ applications!
+
 ## Contributing
 
 Contributions are welcome! Please ensure:

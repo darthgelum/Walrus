@@ -1,122 +1,114 @@
+#define WALRUS_ENABLE_EVENT_LOOP 1
+#define WALRUS_ENABLE_PUBSUB 1
 #include "Walrus/Application.h"
 #include "Walrus/EntryPoint.h"
-#include "Walrus/Timer.h"
+#include "Walrus/Config.h"
+
 #include "Walrus/EventLoop.h"
 
-#include <iostream>
-#include <atomic>
-#include <thread>
+#include "Walrus/PubSub.h"
+#include "Walrus/InMemoryBroker.h"
 
-class EventLoopDemoLayer : public Walrus::Layer
+#include <iostream>
+#include <string>
+
+// Data structure to be sent between objects
+struct DataPacket {
+    int id;
+    std::string message;
+    float timestamp;
+    
+    DataPacket(int id, const std::string& msg, float time) 
+        : id(id), message(msg), timestamp(time) {}
+};
+
+// ObjectA - Sender that uses SetInterval to send data via PubSub
+class ObjectA : public Walrus::Layer
 {
 private:
-	Walrus::Timer m_Timer;
-	std::atomic<int> m_Counter{0};
-	Walrus::EventId m_IntervalId = 0;
-	Walrus::EventId m_TimeoutId = 0;
+    Walrus::EventId m_IntervalId = 0;
+    int m_Counter = 0;
 
 public:
-	virtual void OnAttach() override
-	{
-		std::cout << "\n=== EventLoop Demo Layer Attached ===" << std::endl;
-		std::cout << "Demonstrating SetTimeout, SetInterval, SetImmediate, and parallel execution..." << std::endl;
-		
-		auto& app = Walrus::Application::Get();
-		
-		// 1. SetImmediate - execute as soon as possible
-		std::cout << "\n1. Setting up immediate callbacks..." << std::endl;
-		
-		app.SetImmediate([]() {
-			std::cout << "   [IMMEDIATE 1] This executes immediately! Thread ID: " << std::this_thread::get_id() << std::endl;
-		});
-		
-		app.SetImmediate([]() {
-			std::cout << "   [IMMEDIATE 2] This also executes immediately! Thread ID: " << std::this_thread::get_id() << std::endl;
-		});
-		
-		app.SetImmediate([]() {
-			std::cout << "   [IMMEDIATE 3] All immediate callbacks run in parallel threads!" << std::endl;
-		});
-		
-		// 2. SetTimeout - execute once after delay
-		std::cout << "\n2. Setting up timeout callbacks..." << std::endl;
-		
-		m_TimeoutId = app.SetTimeout([]() {
-			std::cout << "   [TIMEOUT 1000ms] This executes after 1 second! Thread ID: " << std::this_thread::get_id() << std::endl;
-		}, 1000);
-		
-		app.SetTimeout([]() {
-			std::cout << "   [TIMEOUT 2000ms] This executes after 2 seconds!" << std::endl;
-		}, 2000);
-		
-		app.SetTimeout([&app]() {
-			std::cout << "   [TIMEOUT 1500ms] This executes after 1.5 seconds and demonstrates callback capture!" << std::endl;
-			
-			// Nested timeout from within a timeout
-			app.SetTimeout([]() {
-				std::cout << "      [NESTED TIMEOUT 500ms] Nested timeout executed!" << std::endl;
-			}, 500);
-		}, 1500);
-		
-		// 3. SetInterval - execute repeatedly
-		std::cout << "\n3. Setting up interval callback..." << std::endl;
-		
-		m_IntervalId = app.SetInterval([this]() {
-			int count = ++m_Counter;
-			std::cout << "   [INTERVAL 800ms] Repeated execution #" << count << " - Thread ID: " << std::this_thread::get_id() << std::endl;
-			
-			// Stop interval after 5 executions
-			if (count >= 5) {
-				std::cout << "   [INTERVAL] Clearing interval after 5 executions..." << std::endl;
-				Walrus::Application::Get().ClearInterval(m_IntervalId);
-			}
-		}, 800);
-		
-		// 4. Demonstrate cancellation
-		std::cout << "\n4. Setting up cancellation demo..." << std::endl;
-		
-		auto cancelId = app.SetTimeout([]() {
-			std::cout << "   [CANCELLED TIMEOUT] This should NEVER execute!" << std::endl;
-		}, 3000);
-		
-		// Cancel it immediately
-		app.ClearTimeout(cancelId);
-		std::cout << "   Cancelled timeout with ID: " << cancelId << std::endl;
-		
-		// 5. Schedule application close
-		app.SetTimeout([&app]() {
-			std::cout << "\n=== Demo Complete - Closing Application ===" << std::endl;
-			app.Close();
-		}, 6000); // Close after 6 seconds
-		
-		m_Timer.Reset();
-		std::cout << "\nDemo started! Watch the parallel execution of callbacks..." << std::endl;
-	}
+    virtual void OnAttach() override
+    {
+        std::cout << "\n=== ObjectA Attached ===" << std::endl;
+        
+        auto& app = Walrus::Application::Get();
+        
+        std::cout << "Starting interval to send data every 1000ms..." << std::endl;
+        
+        // Set up interval to send data packets every 1000ms
+        m_IntervalId = app.SetInterval([this, &app]() {
+            m_Counter++;
+            
+            // Create and send data packet
+            DataPacket packet(m_Counter, "Message from ObjectA #" + std::to_string(m_Counter), app.GetTime());
+            
+            std::cout << "[ObjectA] Sending packet " << packet.id << ": '" << packet.message 
+                     << "' at time " << packet.timestamp << std::endl;
+            
+            app.Publish<DataPacket>("data_channel", packet);
+            
+            // Stop after 5 messages
+            if (m_Counter >= 5) {
+                std::cout << "[ObjectA] Stopping interval after 5 messages" << std::endl;
+                app.ClearInterval(m_IntervalId);
+                
+                // Schedule application shutdown
+                app.SetTimeout([&app]() {
+                    std::cout << "\n=== Demo Complete - Shutting Down ===" << std::endl;
+                    app.Close();
+                }, 2000);
+            }
+        }, 1000);
+    }
+    
+    virtual void OnDetach() override
+    {
+        std::cout << "[ObjectA] Detached" << std::endl;
+    }
+};
 
-	virtual void OnUpdate(float ts) override
-	{
-		// Layer update still works normally alongside the event loop
-		// This demonstrates that both systems can coexist
-		static float lastPrint = 0.0f;
-		if (m_Timer.Elapsed() - lastPrint >= 2.5f) {
-			std::cout << "[LAYER UPDATE] Normal layer update at " << m_Timer.Elapsed() << "s" << std::endl;
-			lastPrint = m_Timer.Elapsed();
-		}
-	}
-
-	virtual void OnDetach() override
-	{
-		std::cout << "\nEventLoop Demo Layer detached! All timers are automatically cleaned up." << std::endl;
-	}
+// ObjectB - Receiver that subscribes to PubSub messages
+class ObjectB : public Walrus::Layer
+{
+public:
+    virtual void OnAttach() override
+    {
+        std::cout << "[ObjectB] Attached and subscribing to data_channel" << std::endl;
+        
+        auto& app = Walrus::Application::Get();
+        
+        // Subscribe to DataPacket messages on "data_channel"
+        app.Subscribe<DataPacket>("data_channel", [](const Walrus::Message<DataPacket>& msg) {
+            const DataPacket& packet = msg.GetData();
+            std::cout << "[ObjectB] Received packet " << packet.id << ": '" << packet.message 
+                     << "' (sent at " << packet.timestamp << ")" << std::endl;
+        });
+        
+        std::cout << "[ObjectB] Successfully subscribed to data_channel" << std::endl;
+    }
+    
+    virtual void OnDetach() override
+    {
+        std::cout << "[ObjectB] Detached" << std::endl;
+    }
 };
 
 Walrus::Application* Walrus::CreateApplication(int argc, char** argv)
 {
-	Walrus::ApplicationSpecification spec;
-	spec.Name = "Walrus EventLoop Demo";
+    Walrus::ApplicationSpecification spec;
+    spec.Name = "Simple SetInterval PubSub Demo";
 
-	Walrus::Application* app = new Walrus::Application(spec);
-	app->PushLayer<EventLoopDemoLayer>();
-	
-	return app;
+    // Create and configure the InMemoryBroker for PubSub - will throw exception if PUBSUB not enabled
+    spec.PubSubBroker = std::make_shared<Walrus::InMemoryBroker>();
+
+    Walrus::Application* app = new Walrus::Application(spec);
+    
+    // Add both objects as layers
+    app->PushLayer<ObjectB>();  // Add receiver first
+    app->PushLayer<ObjectA>();  // Add sender second
+    
+    return app;
 }

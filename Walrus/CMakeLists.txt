@@ -27,4 +27,9 @@ target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
 # Threading library for std::thread
 find_package(Threads REQUIRED)
-target_link_libraries(${PROJECT_NAME} Threads::Threads)
+
+# Link libraries
+target_link_libraries(${PROJECT_NAME} 
+    Threads::Threads
+    ftl
+)

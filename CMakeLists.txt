@@ -6,6 +6,22 @@ project(WalrusApp VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Include FetchContent module
+include(FetchContent)
+
+# Fetch FiberTaskingLib
+FetchContent_Declare(
+  fibertaskinglib
+  GIT_REPOSITORY https://github.com/RichieSams/FiberTaskingLib.git
+  GIT_TAG        master  # or specify a specific version/tag
+)
+
+# Configure FiberTaskingLib options
+set(FTL_BUILD_TESTS OFF CACHE BOOL "Build FTL tests")
+set(FTL_BUILD_BENCHMARKS OFF CACHE BOOL "Build FTL benchmarks")
+
+FetchContent_MakeAvailable(fibertaskinglib)
+
 # Walrus Framework Configuration Options
 option(WALRUS_ENABLE_EVENT_LOOP "Enable EventLoop functionality" ON)
 option(WALRUS_ENABLE_PUBSUB "Enable PubSub functionality" ON)

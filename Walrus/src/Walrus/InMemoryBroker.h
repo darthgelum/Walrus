@@ -6,28 +6,26 @@
 #include <queue>
 #include <vector>
 #include <mutex>
-#include <condition_variable>
-#include <thread>
 #include <atomic>
 #include <iostream>
+
+#if WALRUS_ENABLE_PUBSUB
+#include <ftl/task_scheduler.h>
+#include <ftl/task.h>
+#endif
 
 namespace Walrus {
 
     // Default in-memory broker implementation
     class InMemoryBroker : public IBroker {
     private:
-        // Topic -> Queue of messages
-        std::unordered_map<std::string, std::queue<std::shared_ptr<BaseMessage>>> m_Topics;
-        
         // Topic -> Type -> List of handlers
         std::unordered_map<std::string, std::unordered_map<std::string, std::vector<GenericMessageHandler>>> m_Subscribers;
         
-        // Threading
+        // Fiber-based processing
         mutable std::mutex m_Mutex;
-        std::condition_variable m_Condition;
-        std::thread m_ProcessorThread;
+        ftl::TaskScheduler* m_TaskScheduler{nullptr};
         std::atomic<bool> m_Running{false};
-        std::atomic<bool> m_StopRequested{false};
 
         // Statistics
         std::atomic<size_t> m_MessagesProcessed{0};
@@ -39,30 +37,24 @@ namespace Walrus {
         ~InMemoryBroker() {
             Stop();
         }
+        
+        void Init(ftl::TaskScheduler* taskScheduler) {
+            m_TaskScheduler = taskScheduler;
+        }
 
         // IBroker interface implementation
         void Start() override {
-            if (m_Running.load()) {
-                return; // Already running
+            if (m_Running.load() || !m_TaskScheduler) {
+                return; // Already running or not initialized
             }
 
             m_Running.store(true);
-            m_StopRequested.store(false);
-            m_ProcessorThread = std::thread(&InMemoryBroker::ProcessMessages, this);
-            
             std::cout << "InMemoryBroker: Started message processing" << std::endl;
         }
 
         void Stop() override {
             if (!m_Running.load()) {
                 return; // Already stopped
-            }
-
-            m_StopRequested.store(true);
-            m_Condition.notify_all();
-
-            if (m_ProcessorThread.joinable()) {
-                m_ProcessorThread.join();
             }
 
             m_Running.store(false);
@@ -98,7 +90,7 @@ namespace Walrus {
         size_t GetMessagesPublished() const { return m_MessagesPublished.load(); }
         size_t GetTopicCount() const { 
             std::lock_guard<std::mutex> lock(m_Mutex);
-            return m_Topics.size(); 
+            return m_Subscribers.size(); 
         }
         size_t GetSubscriberCount() const {
             std::lock_guard<std::mutex> lock(m_Mutex);
@@ -115,8 +107,8 @@ namespace Walrus {
         std::vector<std::string> GetTopics() const {
             std::lock_guard<std::mutex> lock(m_Mutex);
             std::vector<std::string> topics;
-            topics.reserve(m_Topics.size());
-            for (const auto& topic : m_Topics) {
+            topics.reserve(m_Subscribers.size());
+            for (const auto& topic : m_Subscribers) {
                 topics.push_back(topic.first);
             }
             return topics;
@@ -127,79 +119,59 @@ namespace Walrus {
             std::lock_guard<std::mutex> lock(m_Mutex);
             std::string typeName = typeInfo.name();
             m_Subscribers[topic][typeName].push_back(std::move(handler));
-            
-            // Initialize topic queue if it doesn't exist
-            if (m_Topics.find(topic) == m_Topics.end()) {
-                m_Topics[topic] = std::queue<std::shared_ptr<BaseMessage>>();
-            }
         }
 
         void PublishInternal(const std::string& topic, std::shared_ptr<BaseMessage> message) override {
-            {
-                std::lock_guard<std::mutex> lock(m_Mutex);
-                m_Topics[topic].push(message);
-                m_MessagesPublished.fetch_add(1);
+            if (!m_TaskScheduler || !m_Running.load()) {
+                return;
             }
-            m_Condition.notify_all();
+            
+            m_MessagesPublished.fetch_add(1);
+            
+            // Process message immediately using fiber tasks
+            m_TaskScheduler->AddTask(ftl::Task{ProcessMessageTask, 
+                new MessageTaskData{this, topic, message}}, ftl::TaskPriority::Normal);
         }
 
     private:
-        void ProcessMessages() {
-            std::unique_lock<std::mutex> lock(m_Mutex);
+        struct MessageTaskData {
+            InMemoryBroker* broker;
+            std::string topic;
+            std::shared_ptr<BaseMessage> message;
+        };
+        
+        static void ProcessMessageTask(ftl::TaskScheduler* taskScheduler, void* arg) {
+            (void)taskScheduler; // Unused
             
-            while (!m_StopRequested.load()) {
-                // Wait for messages or stop signal
-                m_Condition.wait(lock, [this] {
-                    if (m_StopRequested.load()) return true;
-                    
-                    for (const auto& topicPair : m_Topics) {
-                        if (!topicPair.second.empty()) {
-                            return true;
-                        }
-                    }
-                    return false;
-                });
-
-                if (m_StopRequested.load()) {
-                    break;
-                }
-
-                // Process all available messages
-                for (auto& topicPair : m_Topics) {
-                    const std::string& topic = topicPair.first;
-                    std::queue<std::shared_ptr<BaseMessage>>& messageQueue = topicPair.second;
-                    
-                    while (!messageQueue.empty()) {
-                        auto message = messageQueue.front();
-                        messageQueue.pop();
-                        
-                        // Find subscribers for this topic and message type
-                        auto topicIt = m_Subscribers.find(topic);
-                        if (topicIt != m_Subscribers.end()) {
-                            std::string typeName = message->GetType().name();
-                            auto typeIt = topicIt->second.find(typeName);
-                            if (typeIt != topicIt->second.end()) {
-                                // Deliver to all subscribers of this type
-                                for (const auto& handler : typeIt->second) {
-                                    try {
-                                        // Release lock during handler execution to avoid deadlocks
-                                        lock.unlock();
-                                        handler(message);
-                                        lock.lock();
-                                        
-                                        m_MessagesProcessed.fetch_add(1);
-                                    } catch (const std::exception& e) {
-                                        std::cerr << "InMemoryBroker: Exception in message handler: " << e.what() << std::endl;
-                                    } catch (...) {
-                                        std::cerr << "InMemoryBroker: Unknown exception in message handler" << std::endl;
-                                    }
-                                }
-                            }
+            std::unique_ptr<MessageTaskData> data(static_cast<MessageTaskData*>(arg));
+            data->broker->ProcessSingleMessage(data->topic, data->message);
+        }
+        
+        void ProcessSingleMessage(const std::string& topic, std::shared_ptr<BaseMessage> message) {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            
+            // Find subscribers for this topic and message type
+            auto topicIt = m_Subscribers.find(topic);
+            if (topicIt != m_Subscribers.end()) {
+                std::string typeName = message->GetType().name();
+                auto typeIt = topicIt->second.find(typeName);
+                if (typeIt != topicIt->second.end()) {
+                    // Deliver to all subscribers of this type
+                    for (const auto& handler : typeIt->second) {
+                        try {
+                            handler(message);
+                            m_MessagesProcessed.fetch_add(1);
+                        } catch (const std::exception& e) {
+                            std::cerr << "InMemoryBroker: Exception in message handler: " << e.what() << std::endl;
+                        } catch (...) {
+                            std::cerr << "InMemoryBroker: Unknown exception in message handler" << std::endl;
                         }
                     }
                 }
             }
         }
+        
+
     };
 
 }

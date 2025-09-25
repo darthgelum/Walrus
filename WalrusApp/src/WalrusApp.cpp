@@ -2,113 +2,119 @@
 #define WALRUS_ENABLE_PUBSUB 1
 #include "Walrus/Application.h"
 #include "Walrus/EntryPoint.h"
-#include "Walrus/Config.h"
-
 #include "Walrus/EventLoop.h"
-
 #include "Walrus/PubSub.h"
 #include "Walrus/InMemoryBroker.h"
 
-#include <iostream>
-#include <string>
+#include <ftl/task_scheduler.h>
+#include <ftl/wait_group.h>
 
-// Data structure to be sent between objects
-struct DataPacket {
+#include <iostream>
+
+// Simple message for PubSub demonstration
+struct SimpleMessage {
     int id;
-    std::string message;
-    float timestamp;
+    std::string text;
     
-    DataPacket(int id, const std::string& msg, float time) 
-        : id(id), message(msg), timestamp(time) {}
+    SimpleMessage(int id, const std::string& text) : id(id), text(text) {}
 };
 
-// ObjectA - Sender that uses SetInterval to send data via PubSub
-class ObjectA : public Walrus::Layer
+// Minimal demo layer showcasing all three components
+class CoreDemoLayer : public Walrus::Layer
 {
 private:
-    Walrus::EventId m_IntervalId = 0;
+    Walrus::EventId m_TimerId = 0;
     int m_Counter = 0;
 
 public:
     virtual void OnAttach() override
     {
-        std::cout << "\n=== ObjectA Attached ===" << std::endl;
+        std::cout << "\n=== Core Demo: EventLoop + PubSub + TaskScheduler ===" << std::endl;
         
         auto& app = Walrus::Application::Get();
         
-        std::cout << "Starting interval to send data every 1000ms..." << std::endl;
-        
-        // Set up interval to send data packets every 1000ms
-        m_IntervalId = app.SetInterval([this, &app]() {
-            m_Counter++;
-            
-            // Create and send data packet
-            DataPacket packet(m_Counter, "Message from ObjectA #" + std::to_string(m_Counter), app.GetTime());
-            
-            std::cout << "[ObjectA] Sending packet " << packet.id << ": '" << packet.message 
-                     << "' at time " << packet.timestamp << std::endl;
-            
-            app.Publish<DataPacket>("data_channel", packet);
-            
-            // Stop after 5 messages
-            if (m_Counter >= 5) {
-                std::cout << "[ObjectA] Stopping interval after 5 messages" << std::endl;
-                app.ClearInterval(m_IntervalId);
-                
-                // Schedule application shutdown
-                app.SetTimeout([&app]() {
-                    std::cout << "\n=== Demo Complete - Shutting Down ===" << std::endl;
-                    app.Close();
-                }, 2000);
-            }
-        }, 1000);
-    }
-    
-    virtual void OnDetach() override
-    {
-        std::cout << "[ObjectA] Detached" << std::endl;
-    }
-};
-
-// ObjectB - Receiver that subscribes to PubSub messages
-class ObjectB : public Walrus::Layer
-{
-public:
-    virtual void OnAttach() override
-    {
-        std::cout << "[ObjectB] Attached and subscribing to data_channel" << std::endl;
-        
-        auto& app = Walrus::Application::Get();
-        
-        // Subscribe to DataPacket messages on "data_channel"
-        app.Subscribe<DataPacket>("data_channel", [](const Walrus::Message<DataPacket>& msg) {
-            const DataPacket& packet = msg.GetData();
-            std::cout << "[ObjectB] Received packet " << packet.id << ": '" << packet.message 
-                     << "' (sent at " << packet.timestamp << ")" << std::endl;
+        // 1. Subscribe to messages (MessageBroker)
+        app.Subscribe<SimpleMessage>("demo", [](const Walrus::Message<SimpleMessage>& msg) {
+            const auto& data = msg.GetData();
+            std::cout << "[PubSub] Received: ID=" << data.id << ", Text='" << data.text << "'" << std::endl;
         });
         
-        std::cout << "[ObjectB] Successfully subscribed to data_channel" << std::endl;
+        // 2. Setup timer (EventLoop)
+        m_TimerId = app.SetInterval([this, &app]() {
+            m_Counter++;
+            std::cout << "\n--- Timer Tick #" << m_Counter << " ---" << std::endl;
+            
+            // Publish message
+            app.Publish<SimpleMessage>("demo", SimpleMessage(m_Counter, "Hello from tick " + std::to_string(m_Counter)));
+            
+            // 3. Run fiber task (TaskScheduler)
+            this->RunFiberTask(app.GetTaskScheduler(), m_Counter);
+            
+            // Stop after 3 ticks
+            if (m_Counter >= 3) {
+                std::cout << "[EventLoop] Clearing timer" << std::endl;
+                app.ClearInterval(m_TimerId);
+                
+                app.SetTimeout([&app]() {
+                    std::cout << "\n=== Demo Complete ===\n" << std::endl;
+                    app.Close();
+                }, 500);
+            }
+        }, 1500); // Every 1.5 seconds
+        
+        std::cout << "[EventLoop] Timer started with ID: " << m_TimerId << std::endl;
     }
     
+private:
+    void RunFiberTask(ftl::TaskScheduler& scheduler, int taskId) {
+        std::cout << "[TaskScheduler] Running fiber task #" << taskId << std::endl;
+        
+        // Create a simple computational task
+        auto* taskData = new int(taskId);
+        
+        ftl::Task computeTask = {
+            [](ftl::TaskScheduler*, void* arg) {
+                int* id = static_cast<int*>(arg);
+                int taskId = *id;
+                delete id;
+                
+                // Simple computation
+                int result = 0;
+                for (int i = 0; i < 1000; i++) {
+                    result += (taskId * i) % 100;
+                }
+                
+                std::cout << "[TaskScheduler] Task #" << taskId << " computed result: " << result << std::endl;
+            },
+            taskData
+        };
+        
+        // Run task and wait for completion
+        ftl::WaitGroup wg(&scheduler);
+        scheduler.AddTask(computeTask, ftl::TaskPriority::Normal, &wg);
+        wg.Wait(false);
+        
+        std::cout << "[TaskScheduler] Task #" << taskId << " completed" << std::endl;
+    }
+
+public:
     virtual void OnDetach() override
     {
-        std::cout << "[ObjectB] Detached" << std::endl;
+        std::cout << "[CoreDemoLayer] Detached after " << m_Counter << " ticks" << std::endl;
     }
 };
 
 Walrus::Application* Walrus::CreateApplication(int argc, char** argv)
 {
-    Walrus::ApplicationSpecification spec;
-    spec.Name = "Simple SetInterval PubSub Demo";
-
-    // Create and configure the InMemoryBroker for PubSub - will throw exception if PUBSUB not enabled
+    // Use BackgroundService preset for efficiency
+    Walrus::ApplicationSpecification spec = Walrus::ApplicationSpecification::BackgroundService();
+    spec.Name = "Core Demo: EventLoop + PubSub + TaskScheduler";
+    
+    // Enable PubSub with InMemoryBroker
     spec.PubSubBroker = std::make_shared<Walrus::InMemoryBroker>();
 
     Walrus::Application* app = new Walrus::Application(spec);
-    
-    // Add both objects as layers
-    app->PushLayer<ObjectB>();  // Add receiver first
-    app->PushLayer<ObjectA>();  // Add sender second
+    app->PushLayer<CoreDemoLayer>();
     
     return app;
 }

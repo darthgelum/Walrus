@@ -1,4 +1,5 @@
-#pragma once
+#ifndef WALRUS_ENTRYPOINT_H
+#define WALRUS_ENTRYPOINT_H
 
 extern Walrus::Application* Walrus::CreateApplication(int argc, char** argv);
 bool g_ApplicationRunning = true;
@@ -19,3 +20,5 @@ int main(int argc, char** argv)
 {
 	return Walrus::Main(argc, argv);
 }
+
+#endif // WALRUS_ENTRYPOINT_H

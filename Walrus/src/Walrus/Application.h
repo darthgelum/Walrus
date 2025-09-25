@@ -1,5 +1,7 @@
-#pragma once
+#ifndef WALRUS_APPLICATION_H
+#define WALRUS_APPLICATION_H
 
+#include "Config.h"
 #include "Layer.h"
 #include "EventLoop.h"
 
@@ -38,7 +40,7 @@ namespace Walrus {
 
 		float GetTime();
 
-		// Event Loop Access
+		// Event Loop Access (always available - stubs when disabled)
 		EventLoop& GetEventLoop() { return m_EventLoop; }
 		
 		// Global event loop methods (convenience)
@@ -61,9 +63,11 @@ namespace Walrus {
 		std::chrono::steady_clock::time_point m_StartTime;
 
 		std::vector<std::shared_ptr<Layer>> m_LayerStack;
-		EventLoop m_EventLoop;
+		EventLoop m_EventLoop;  // Always present - behavior depends on compile-time flag
 	};
 
 	// Implemented by CLIENT
 	Application* CreateApplication(int argc, char** argv);
 }
+
+#endif // WALRUS_APPLICATION_H

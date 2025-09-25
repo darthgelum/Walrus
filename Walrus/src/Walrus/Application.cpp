@@ -31,7 +31,7 @@ namespace Walrus {
 		
 		Init();
 		
-		// Start the event loop
+		// Start the event loop (no-op if disabled)
 		m_EventLoop.Start();
 
 		m_StartTime = std::chrono::steady_clock::now();
@@ -62,7 +62,7 @@ namespace Walrus {
 			layer->OnDetach();
 		}
 		
-		// Stop the event loop
+		// Stop the event loop (no-op if disabled)
 		m_EventLoop.Stop();
 
 		Shutdown();

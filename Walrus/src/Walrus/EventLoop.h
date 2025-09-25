@@ -1,4 +1,9 @@
-#pragma once
+#ifndef WALRUS_EVENTLOOP_H
+#define WALRUS_EVENTLOOP_H
+
+#include "Config.h"
+
+#if WALRUS_ENABLE_EVENT_LOOP
 
 #include <functional>
 #include <chrono>
@@ -101,4 +106,38 @@ namespace Walrus {
         std::mutex m_EventMutex;
     };
 
-}
+} // namespace Walrus
+
+#else // WALRUS_ENABLE_EVENT_LOOP == 0
+
+// Stub declarations when EventLoop is disabled
+#include <functional>
+#include <cstdint>
+
+namespace Walrus {
+    
+    using EventCallback = std::function<void()>;
+    using EventId = uint64_t;
+    
+    class EventLoop {
+    public:
+        EventLoop();
+        ~EventLoop();
+        
+        void Start();
+        void Stop();
+        
+        EventId SetTimeout(EventCallback callback, int milliseconds);
+        EventId SetInterval(EventCallback callback, int milliseconds);
+        EventId SetImmediate(EventCallback callback);
+        void ClearInterval(EventId id);
+        void ClearTimeout(EventId id);
+        
+        bool IsRunning() const;
+    };
+    
+} // namespace Walrus
+
+#endif // WALRUS_ENABLE_EVENT_LOOP
+
+#endif // WALRUS_EVENTLOOP_H

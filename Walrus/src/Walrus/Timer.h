@@ -1,4 +1,5 @@
-#pragma once
+#ifndef WALRUS_TIMER_H
+#define WALRUS_TIMER_H
 
 #include <iostream>
 #include <string>
@@ -51,3 +52,5 @@ namespace Walrus {
 
 
 }
+
+#endif // WALRUS_TIMER_H

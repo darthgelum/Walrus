@@ -1,4 +1,5 @@
-#pragma once
+#ifndef WALRUS_LAYER_H
+#define WALRUS_LAYER_H
 
 namespace Walrus {
 
@@ -14,3 +15,5 @@ namespace Walrus {
 	};
 
 }
+
+#endif // WALRUS_LAYER_H

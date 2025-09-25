@@ -1,4 +1,5 @@
-#pragma once
+#ifndef WALRUS_RANDOM_H
+#define WALRUS_RANDOM_H
 
 #include <random>
 
@@ -38,4 +39,4 @@ namespace Walrus {
 
 }
 
-
+#endif // WALRUS_RANDOM_H

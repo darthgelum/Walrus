@@ -1,4 +1,7 @@
 #include "EventLoop.h"
+
+#if WALRUS_ENABLE_EVENT_LOOP
+
 #include <iostream>
 #include <algorithm>
 
@@ -232,4 +235,31 @@ namespace Walrus {
         return m_NextId.fetch_add(1);
     }
 
-}
+} // namespace Walrus
+
+#else // WALRUS_ENABLE_EVENT_LOOP == 0
+
+// Stub implementations when EventLoop is disabled
+#include <functional>
+#include <cstdint>
+
+namespace Walrus {
+    
+    // Stub implementations - implement the methods declared in the header
+    EventLoop::EventLoop() {}
+    EventLoop::~EventLoop() {}
+    
+    void EventLoop::Start() { /* no-op */ }
+    void EventLoop::Stop() { /* no-op */ }
+    
+    EventId EventLoop::SetTimeout(EventCallback, int) { return 0; }
+    EventId EventLoop::SetInterval(EventCallback, int) { return 0; }
+    EventId EventLoop::SetImmediate(EventCallback) { return 0; }
+    void EventLoop::ClearInterval(EventId) { /* no-op */ }
+    void EventLoop::ClearTimeout(EventId) { /* no-op */ }
+    
+    bool EventLoop::IsRunning() const { return false; }
+    
+} // namespace Walrus
+
+#endif // WALRUS_ENABLE_EVENT_LOOP

@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Walrus Framework Configuration Options
 option(WALRUS_ENABLE_EVENT_LOOP "Enable EventLoop functionality" ON)
+option(WALRUS_ENABLE_PUBSUB "Enable PubSub functionality" ON)
 
 # Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -38,6 +39,12 @@ if(WALRUS_ENABLE_EVENT_LOOP)
     add_compile_definitions(WALRUS_ENABLE_EVENT_LOOP=1)
 else()
     add_compile_definitions(WALRUS_ENABLE_EVENT_LOOP=0)
+endif()
+
+if(WALRUS_ENABLE_PUBSUB)
+    add_compile_definitions(WALRUS_ENABLE_PUBSUB=1)
+else()
+    add_compile_definitions(WALRUS_ENABLE_PUBSUB=0)
 endif()
 
 # Add subdirectories

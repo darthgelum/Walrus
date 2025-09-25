@@ -13,6 +13,11 @@ namespace Walrus {
 		: m_Specification(applicationSpecification), m_Running(false)
 	{
 		s_Instance = this;
+		
+#if WALRUS_ENABLE_PUBSUB
+		// Set the PubSub broker from specification
+		m_PubSubBroker = applicationSpecification.PubSubBroker;
+#endif
 	}
 
 	Application::~Application()
@@ -31,8 +36,16 @@ namespace Walrus {
 		
 		Init();
 		
-		// Start the event loop (no-op if disabled)
+#if WALRUS_ENABLE_EVENT_LOOP
 		m_EventLoop.Start();
+#endif
+#if WALRUS_ENABLE_PUBSUB
+		// Start the PubSub broker if available
+		if (m_PubSubBroker) {
+			m_PubSubBroker->Start();
+			std::cout << "PubSub broker started" << std::endl;
+		}
+#endif
 
 		m_StartTime = std::chrono::steady_clock::now();
 
@@ -62,8 +75,17 @@ namespace Walrus {
 			layer->OnDetach();
 		}
 		
-		// Stop the event loop (no-op if disabled)
+#if WALRUS_ENABLE_EVENT_LOOP
 		m_EventLoop.Stop();
+#endif
+
+#if WALRUS_ENABLE_PUBSUB
+		// Stop the PubSub broker if available
+		if (m_PubSubBroker) {
+			m_PubSubBroker->Stop();
+			std::cout << "PubSub broker stopped" << std::endl;
+		}
+#endif
 
 		Shutdown();
 	}

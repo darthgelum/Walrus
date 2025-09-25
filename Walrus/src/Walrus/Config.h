@@ -27,10 +27,20 @@
     #endif
 #endif
 
-// Other framework features can be added here as needed
-// Example:
-// #ifndef WALRUS_ENABLE_PUBSUB
-//     #define WALRUS_ENABLE_PUBSUB 1
-// #endif
+// PubSub Configuration
+// WALRUS_ENABLE_PUBSUB is controlled by CMake option (-DWALRUS_ENABLE_PUBSUB=ON/OFF)
+// Default: ON (enabled) - use cmake -DWALRUS_ENABLE_PUBSUB=OFF to disable
+// This allows build-time configuration of PubSub functionality.
+#ifndef WALRUS_ENABLE_PUBSUB
+    #error "WALRUS_ENABLE_PUBSUB must be defined by the build system (CMake)"
+#endif
+
+// Additional PubSub settings (only used when WALRUS_ENABLE_PUBSUB is enabled)
+#if WALRUS_ENABLE_PUBSUB
+    // Enable debug logging for PubSub operations
+    #ifndef WALRUS_PUBSUB_DEBUG
+        #define WALRUS_PUBSUB_DEBUG 0
+    #endif
+#endif
 
 #endif // WALRUS_CONFIG_H

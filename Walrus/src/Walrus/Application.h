@@ -3,6 +3,7 @@
 
 #include "Config.h"
 #include "Layer.h"
+#include "LayerTree.h"
 #include "EventLoop.h"
 
 #if WALRUS_ENABLE_PUBSUB
@@ -117,10 +118,35 @@ namespace Walrus {
 		void PushLayer()
 		{
 			static_assert(std::is_base_of<Layer, T>::value, "Pushed type is not subclass of Layer!");
-			m_LayerStack.emplace_back(std::make_shared<T>());
+			m_LayerTree.CreateRootNode(std::make_shared<T>());
 		}
 
-		void PushLayer(const std::shared_ptr<Layer>& layer) { m_LayerStack.emplace_back(layer); }
+		void PushLayer(const std::shared_ptr<Layer>& layer) { m_LayerTree.CreateRootNode(layer); }
+		
+		// Tree-based layer management
+		void PushLayerAsRoot(const std::shared_ptr<Layer>& layer, const std::string& name = "") { 
+			m_LayerTree.CreateRootNode(layer, name); 
+		}
+		
+		void PushLayerAsChild(const std::string& parentName, const std::shared_ptr<Layer>& layer, const std::string& childName = "") {
+			m_LayerTree.CreateChildNode(parentName, layer, childName);
+		}
+		
+		// Access to the layer tree for advanced operations
+		LayerTree& GetLayerTree() { return m_LayerTree; }
+		const LayerTree& GetLayerTree() const { return m_LayerTree; }
+		
+		// Convenience method for building complex layer hierarchies
+		std::shared_ptr<LayerTreeBuilder> CreateLayerTreeBuilder() { 
+			return std::make_shared<LayerTreeBuilder>(); 
+		}
+		
+		// Replace the entire layer tree (useful with LayerTreeBuilder)
+		void SetLayerTree(std::shared_ptr<LayerTree> tree) {
+			if (tree) {
+				m_LayerTree = *tree;
+			}
+		}
 
 		void Close();
 
@@ -198,6 +224,7 @@ namespace Walrus {
 		std::chrono::steady_clock::time_point m_StartTime;
 
 		std::vector<std::shared_ptr<Layer>> m_LayerStack;
+		LayerTree m_LayerTree;
 		
 		// FiberTaskingLib scheduler - shared across all systems
 		ftl::TaskScheduler m_TaskScheduler;

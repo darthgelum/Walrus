@@ -78,40 +78,9 @@ namespace Walrus {
 			m_TimeStep = time - m_LastFrameTime;
 			m_LastFrameTime = time;
 			
-			// Update all layers in parallel using fibers
-			if (!m_LayerStack.empty()) {
-				ftl::WaitGroup wg(&m_TaskScheduler);
-				
-				// Create tasks for layer updates
-				std::vector<ftl::Task> layerTasks;
-				layerTasks.reserve(m_LayerStack.size());
-				
-				for (auto& layer : m_LayerStack) {
-					layerTasks.push_back({ 
-						[](ftl::TaskScheduler*, void* arg) {
-							auto* layerData = static_cast<std::pair<Layer*, float>*>(arg);
-							layerData->first->OnUpdate(layerData->second);
-						}, 
-						new std::pair<Layer*, float>(layer.get(), m_TimeStep)
-					});
-				}
-				
-				// Submit all layer tasks
-				m_TaskScheduler.AddTasks(
-					static_cast<uint32_t>(layerTasks.size()), 
-					layerTasks.data(), 
-					ftl::TaskPriority::Normal, 
-					&wg
-				);
-				
-				// Wait for all layer updates to complete
-				// pinToCurrentThread = false allows fibers to resume on any thread for better performance
-				wg.Wait(false);
-				
-				// Clean up the allocated pairs
-				for (auto& task : layerTasks) {
-					delete static_cast<std::pair<Layer*, float>*>(task.ArgData);
-				}
+			// Update all layers using the hierarchical tree with parallel execution
+			if (!m_LayerTree.IsEmpty()) {
+				m_LayerTree.UpdateTree(m_TimeStep, &m_TaskScheduler);
 			}
 
 			// Update rate limiting based on configuration
@@ -125,11 +94,8 @@ namespace Walrus {
 			}
 		}
 
-		// Detach all layers
-		for (auto& layer : m_LayerStack)
-		{
-			layer->OnDetach();
-		}
+		// Detach all layers in the tree
+		m_LayerTree.OnDetachAll();
 		
 #if WALRUS_ENABLE_EVENT_LOOP
 		m_EventLoop.Stop();
@@ -174,10 +140,13 @@ namespace Walrus {
 		std::cout << "  Target Update Rate: " << m_Specification.TargetFPS << " Hz" << 
 			(m_Specification.EnableFrameRateLimit ? " (limited)" : " (unlimited)") << std::endl;
 		
-		// Now attach all layers - EventLoop is initialized so they can use SetInterval/SetTimeout
-		for (auto& layer : m_LayerStack) {
-			layer->OnAttach();
-		}
+		// Display Layer Tree structure
+		std::cout << std::endl;
+		m_LayerTree.PrintTree();
+		std::cout << std::endl;
+		
+		// Now attach all layers in the tree - EventLoop is initialized so they can use SetInterval/SetTimeout
+		m_LayerTree.OnAttachAll();
 	}
 
 	void Application::Shutdown()

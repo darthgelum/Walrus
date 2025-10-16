@@ -8,6 +8,7 @@ add_library(${PROJECT_NAME} STATIC
     src/Walrus/EventLoop.cpp
     src/Walrus/Application.h
     src/Walrus/Layer.h
+    src/Walrus/LayerTree.cpp
     src/Walrus/EntryPoint.h
     src/Walrus/Random.h
     src/Walrus/Timer.h
